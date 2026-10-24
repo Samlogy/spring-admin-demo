@@ -1,5 +1,6 @@
 package com.example.monolith.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.info.InfoEndpoint;
 import org.springframework.boot.health.actuate.endpoint.HealthEndpoint;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
@@ -14,10 +15,14 @@ import org.springframework.security.web.SecurityFilterChain;
 /**
  * Secures the Actuator endpoints for Spring Boot Admin.
  * <p>
- * Only {@code health} and {@code info} are public (health details still need the ACTUATOR role).
- * Every other endpoint needs HTTP Basic with the technical Actuator account
+ * Every endpoint needs HTTP Basic with the technical Actuator account
  * ({@code ACTUATOR_USER}/{@code ACTUATOR_PASSWORD}, see {@code spring.security.user.*}), which the
  * Admin Server receives through the instance metadata {@code user.name}/{@code user.password}.
+ * <p>
+ * {@code health} and {@code info} are the exception: they are public (health details still need the
+ * ACTUATOR role) unless {@code app.actuator.public-health=false}, which prod sets. The Kubernetes probe
+ * paths {@code /livez} and {@code /readyz} stay open either way: they are additional paths on the main
+ * port, not Actuator endpoint paths.
  */
 @Configuration(proxyBeanMethods = false)
 public class ActuatorSecurityConfig {
@@ -26,11 +31,15 @@ public class ActuatorSecurityConfig {
 
     @Bean
     @Order(1)
-    SecurityFilterChain actuatorSecurityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain actuatorSecurityFilterChain(HttpSecurity http,
+            @Value("${app.actuator.public-health:true}") boolean publicHealth) throws Exception {
         http.securityMatcher(EndpointRequest.toAnyEndpoint())
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(EndpointRequest.to(HealthEndpoint.class, InfoEndpoint.class)).permitAll()
-                        .anyRequest().hasRole(ACTUATOR_ROLE))
+                .authorizeHttpRequests(auth -> {
+                    if (publicHealth) {
+                        auth.requestMatchers(EndpointRequest.to(HealthEndpoint.class, InfoEndpoint.class)).permitAll();
+                    }
+                    auth.anyRequest().hasRole(ACTUATOR_ROLE);
+                })
                 .httpBasic(Customizer.withDefaults())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 // Stateless, Basic-auth machine-to-machine calls only (no browser session to ride on),

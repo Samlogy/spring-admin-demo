@@ -247,3 +247,27 @@ spring:
         ms-teams:
           enabled: ${TEAMS_NOTIFY_ENABLED:true}
           status-changed-title: "[PROD] Status changed"
+
+admin:
+  security:
+    # prod: no read-only role at all. No viewer user, no viewer group mapping, and reading the UI or
+    # proxying a GET on Actuator requires ROLE_ADMIN. Only members of OIDC_ADMIN_GROUPS can log in.
+    viewer-enabled: false
+    oidc:
+      # Not read in prod (viewer-enabled=false), so OIDC_VIEWER_GROUPS is not required there.
+      viewer-groups: ""
+
+management:
+  # The Admin Server's own Actuator moves to a separate internal port: on the public port (ADMIN_PORT)
+  # /actuator/** simply does not exist (404), so nothing is readable without logging in.
+  # Point the Kubernetes probes at <pod-ip>:9091/actuator/health/liveness and /readiness.
+  server:
+    port: ${ADMIN_MANAGEMENT_PORT:9091}
+  endpoints:
+    web:
+      exposure:
+        # health only (liveness/readiness probes). info would publish the build and git version.
+        include: health
+  endpoint:
+    info:
+      access: none

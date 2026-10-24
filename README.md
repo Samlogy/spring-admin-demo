@@ -38,6 +38,29 @@ On Windows PowerShell, use `$env:ADMIN_CLIENT_USER="client"` (one line per varia
 
 The values above are throwaway local passwords. In recf/qua/prod they come from the secret manager.
 
+## Run it in recf / qua / prod
+
+Same jars/images everywhere; only the profile and the environment variables change.
+
+```bash
+# Admin Server (1 instance per environment)
+SPRING_PROFILES_ACTIVE=recf \
+ADMIN_CLIENT_USER=... ADMIN_CLIENT_PASSWORD=... \
+OIDC_ISSUER_URI=https://adfs.example.com/adfs OIDC_CLIENT_ID=... OIDC_CLIENT_SECRET=... \
+OIDC_ADMIN_GROUPS=SBA-Admin-RECF OIDC_VIEWER_GROUPS=SBA-Viewer-RECF \
+  java -jar admin-server/target/admin-server-*.jar
+
+# Monolith
+SPRING_PROFILES_ACTIVE=recf ADMIN_SERVER_URL=https://admin-recf.example.com \
+ADMIN_CLIENT_USER=... ADMIN_CLIENT_PASSWORD=... ACTUATOR_USER=... ACTUATOR_PASSWORD=... \
+  java -jar target/monolith-*.jar
+```
+
+Use `qua` or `prod` the same way. **prod is locked down further**: no viewer role (only members of
+`OIDC_ADMIN_GROUPS` can log in, so drop `OIDC_VIEWER_GROUPS`), the monolith's `/actuator` answers nothing
+without the technical account, and the Admin Server's own `/actuator` moves to the internal port 9091.
+Details and the full variable tables: [`docs/spring-boot-admin.md`](docs/spring-boot-admin.md).
+
 ## Try the CRUD API
 
 ```bash
@@ -77,6 +100,6 @@ Stop the monolith (Ctrl+C): within a few seconds the Admin shows it OFFLINE (and
 ## Tests
 
 ```bash
-mvn verify                       # monolith
-(cd admin-server && mvn verify)  # admin server (no IdP needed)
+mvn verify                       # monolith: 15 tests
+(cd admin-server && mvn verify)  # admin server: 23 tests (no IdP needed)
 ```

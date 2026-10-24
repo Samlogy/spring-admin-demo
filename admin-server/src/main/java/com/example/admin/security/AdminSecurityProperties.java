@@ -9,15 +9,18 @@ import java.util.Set;
 /**
  * Admin Server security settings ({@code admin.security.*}).
  *
- * @param mode   {@code basic} (dev: local users) or {@code oidc} (recf/qua/prod: ADFS / Entra login)
- * @param client technical registration account used by the monolith (ROLE_CLIENT, HTTP Basic only)
- * @param admin  dev only: local ROLE_ADMIN user
- * @param viewer dev only: local ROLE_VIEWER user
- * @param oidc   mapping of IdP groups/roles to ROLE_ADMIN / ROLE_VIEWER
+ * @param mode          {@code basic} (dev: local users) or {@code oidc} (recf/qua/prod: ADFS / Entra login)
+ * @param viewerEnabled whether the read-only ROLE_VIEWER exists at all. {@code false} in prod: no viewer user,
+ *                      no viewer group mapping, and read access requires ROLE_ADMIN
+ * @param client        technical registration account used by the monolith (ROLE_CLIENT, HTTP Basic only)
+ * @param admin         dev only: local ROLE_ADMIN user
+ * @param viewer        dev only: local ROLE_VIEWER user (ignored when {@code viewerEnabled} is false)
+ * @param oidc          mapping of IdP groups/roles to ROLE_ADMIN / ROLE_VIEWER
  */
 @ConfigurationProperties("admin.security")
 public record AdminSecurityProperties(
         @DefaultValue("oidc") Mode mode,
+        @DefaultValue("true") boolean viewerEnabled,
         Account client,
         Account admin,
         Account viewer,

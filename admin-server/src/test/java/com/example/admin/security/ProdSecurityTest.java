@@ -13,6 +13,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.oauth2.core.oidc.OidcIdToken;
+import org.springframework.security.oauth2.core.oidc.user.OidcUserAuthority;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -24,7 +26,9 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.endsWith;
@@ -37,7 +41,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Authorization rules of the Admin Server with the prod configuration (OIDC mode).
+ * Authorization rules of the Admin Server with the prod configuration (OIDC mode, viewer role disabled).
  * Human users are mocked (no IdP needed); the monolith is a local stub.
  */
 @SpringBootTest
@@ -70,6 +74,9 @@ class ProdSecurityTest {
     @Autowired
     private InstanceRegistry registry;
 
+    @Autowired
+    private AdminSecurityProperties properties;
+
     private String instance;
 
     @BeforeEach
@@ -100,21 +107,37 @@ class ProdSecurityTest {
     }
 
     @Test
-    void ownHealthIsPublic() throws Exception {
-        mvc.perform(get("/actuator/health")).andExpect(status().isOk());
+    void ownActuatorIsNotOnThePublicPort() throws Exception {
+        // prod moves the Admin Server's own Actuator to management.server.port (9091), so nothing under
+        // /actuator is mapped on the port the ingress publishes: health and info are 404 there, and every
+        // other path needs ROLE_ADMIN.
+        mvc.perform(get("/actuator/health")).andExpect(status().isNotFound());
+        mvc.perform(get("/actuator/info")).andExpect(status().isNotFound());
+        for (String endpoint : new String[] { "env", "beans", "metrics", "loggers", "heapdump" }) {
+            mvc.perform(get("/actuator/" + endpoint)).andExpect(status().isUnauthorized());
+        }
     }
 
-    // --- VIEWER ----------------------------------------------------------------------------------------------
+    // --- VIEWER: the role does not exist in prod ---------------------------------------------------------------
 
     @Test
-    void viewerCanReadUiAndActuator() throws Exception {
-        mvc.perform(get("/").with(viewer())).andExpect(status().isOk());
-        assertThat(proxy(get(instance + "/actuator/health").with(viewer())).getResponse().getStatus()).isEqualTo(200);
-        assertThat(proxy(get(instance + "/actuator/loggers").with(viewer())).getResponse().getStatus()).isEqualTo(200);
+    void viewerRoleIsDisabledInProd() {
+        assertThat(properties.viewerEnabled()).isFalse();
+        assertThat(properties.oidc().viewerGroups()).isEmpty();
     }
 
     @Test
-    void viewerCannotChangeLogLevel() throws Exception {
+    void viewerCannotReadAnything() throws Exception {
+        mvc.perform(get("/").with(viewer())).andExpect(status().isForbidden());
+        mvc.perform(get("/applications").with(viewer())).andExpect(status().isForbidden());
+        mvc.perform(get(instance + "/actuator/health").with(viewer())).andExpect(status().isForbidden());
+        mvc.perform(get(instance + "/actuator/loggers").with(viewer())).andExpect(status().isForbidden());
+        mvc.perform(get("/applications/monolith/actuator/metrics").with(viewer())).andExpect(status().isForbidden());
+        assertThat(stub.actuatorRequests).isEmpty();
+    }
+
+    @Test
+    void viewerCannotWriteAnything() throws Exception {
         mvc.perform(post(instance + "/actuator/loggers/com.example").with(viewer()).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"configuredLevel\":\"DEBUG\"}"))
                 .andExpect(status().isForbidden());
@@ -122,22 +145,19 @@ class ProdSecurityTest {
         mvc.perform(post("/applications/monolith/actuator/loggers/com.example").with(viewer()).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"configuredLevel\":\"DEBUG\"}"))
                 .andExpect(status().isForbidden());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete(instance)
+                .with(viewer()).with(csrf())).andExpect(status().isForbidden());
         assertThat(stub.actuatorRequests).noneMatch(r -> r.contains("/loggers/com.example"));
     }
 
     @Test
-    void viewerCannotGetHeapdumpOrEnv() throws Exception {
-        mvc.perform(get(instance + "/actuator/heapdump").with(viewer())).andExpect(status().isForbidden());
-        mvc.perform(get(instance + "/actuator/env").with(viewer())).andExpect(status().isForbidden());
-        mvc.perform(get(instance + "/actuator/env/spring.datasource.password").with(viewer())).andExpect(status().isForbidden());
-        mvc.perform(get("/applications/monolith/actuator/env").with(viewer())).andExpect(status().isForbidden());
-        assertThat(stub.actuatorRequests).noneMatch(r -> r.contains("/heapdump") || r.contains("/env"));
-    }
-
-    @Test
-    void viewerCannotUnregisterAnInstance() throws Exception {
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete(instance)
-                .with(viewer()).with(csrf())).andExpect(status().isForbidden());
+    void aUserInTheViewerGroupOnlyGetsNoRole() {
+        IdpGroupsAuthoritiesMapper mapper =
+                new IdpGroupsAuthoritiesMapper(properties.oidc(), properties.viewerEnabled());
+        OidcIdToken token = OidcIdToken.withTokenValue("t").subject("carol").issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(60))
+                .claims(c -> c.put("groups", List.of("viewer-test"))).build();
+        assertThat(mapper.mapAuthorities(List.of(new OidcUserAuthority(token)))).isEmpty();
     }
 
     // --- ADMIN -----------------------------------------------------------------------------------------------

@@ -25,6 +25,9 @@ management:
 
 app:
   actuator:
+    # prod: nothing on /actuator answers anonymously, not even health and info. The Admin Server
+    # authenticates with the ACTUATOR account; Kubernetes uses /livez and /readyz on the main port.
+    public-health: false
     http-exchanges:
       enabled: false
 

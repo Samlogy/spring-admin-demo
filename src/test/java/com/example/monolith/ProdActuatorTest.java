@@ -17,7 +17,10 @@ import java.util.Base64;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** prod: separate management port, reduced exposure (no heapdump, no env), Actuator behind the technical account. */
+/**
+ * prod: separate management port, reduced exposure (no heapdump, no env), and the whole Actuator behind the
+ * technical account, health and info included. Only the Kubernetes probe paths stay open.
+ */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "management.server.port=0")
 @ActiveProfiles("prod")
 class ProdActuatorTest {
@@ -52,12 +55,21 @@ class ProdActuatorTest {
     }
 
     @Test
-    void onlyHealthAndInfoArePublic() {
-        assertThat(get("/actuator/health", false)).isEqualTo(200);
-        assertThat(get("/actuator/info", false)).isEqualTo(200);
-        for (String endpoint : new String[] { "loggers", "metrics", "prometheus", "threaddump", "logfile" }) {
+    void nothingOnActuatorIsPublic() {
+        for (String endpoint : new String[] { "health", "info", "loggers", "metrics", "prometheus", "threaddump",
+                "logfile" }) {
             assertThat(get("/actuator/" + endpoint, false)).as(endpoint).isEqualTo(401);
             assertThat(get("/actuator/" + endpoint, true)).as(endpoint).isEqualTo(200);
+        }
+    }
+
+    @Test
+    void kubernetesProbePathsStayOpenOnTheMainPort() throws Exception {
+        for (String path : new String[] { "/livez", "/readyz" }) {
+            HttpResponse<Void> response = http.send(HttpRequest.newBuilder(
+                    URI.create("http://localhost:" + serverPort + path)).build(),
+                    HttpResponse.BodyHandlers.discarding());
+            assertThat(response.statusCode()).as(path).isEqualTo(200);
         }
     }
 

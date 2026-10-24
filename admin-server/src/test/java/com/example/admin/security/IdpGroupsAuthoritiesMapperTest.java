@@ -15,8 +15,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class IdpGroupsAuthoritiesMapperTest {
 
-    private final IdpGroupsAuthoritiesMapper mapper = new IdpGroupsAuthoritiesMapper(new AdminSecurityProperties.Oidc(
-            "adfs", List.of("groups", "group", "roles", "role"), Set.of("Admin-Prod"), Set.of("viewer-prod")));
+    private static final AdminSecurityProperties.Oidc CONFIG = new AdminSecurityProperties.Oidc(
+            "adfs", List.of("groups", "group", "roles", "role"), Set.of("Admin-Prod"), Set.of("viewer-prod"));
+
+    private final IdpGroupsAuthoritiesMapper mapper = new IdpGroupsAuthoritiesMapper(CONFIG);
 
     @Test
     void mapsAdfsGroupClaimToAdmin() {
@@ -39,7 +41,18 @@ class IdpGroupsAuthoritiesMapperTest {
         assertThat(map(Map.of("groups", List.of("CLIENT", "ROLE_CLIENT", "admin-qua")))).isEmpty();
     }
 
+    @Test
+    void viewerGroupsGrantNothingWhenTheViewerRoleIsDisabled() {
+        IdpGroupsAuthoritiesMapper prod = new IdpGroupsAuthoritiesMapper(CONFIG, false);
+        assertThat(map(prod, Map.of("groups", List.of("viewer-prod")))).isEmpty();
+        assertThat(map(prod, Map.of("groups", List.of("admin-prod", "viewer-prod")))).containsExactly("ROLE_ADMIN");
+    }
+
     private Collection<String> map(Map<String, Object> claims) {
+        return map(this.mapper, claims);
+    }
+
+    private Collection<String> map(IdpGroupsAuthoritiesMapper mapper, Map<String, Object> claims) {
         OidcIdToken token = OidcIdToken.withTokenValue("t").subject("u").issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(60)).claims(c -> c.putAll(claims)).build();
         Collection<? extends GrantedAuthority> mapped = mapper.mapAuthorities(List.of(new OidcUserAuthority(token)));

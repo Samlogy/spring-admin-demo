@@ -51,14 +51,15 @@ One Admin Server per environment, built from the same code and image. Only the S
 | Variable | dev | recf | qua | prod | Purpose |
 |---|---|---|---|---|---|
 | `SPRING_PROFILES_ACTIVE` | `dev` | `recf` | `qua` | `prod` | Environment (recf/qua/prod also turn on the `oidc` profile) |
-| `ADMIN_PORT` | ◻ [8081] | ◻ | ◻ | ◻ | HTTP port |
+| `ADMIN_PORT` | ◻ [8081] | ◻ | ◻ | ◻ | HTTP port (the one the ingress publishes) |
+| `ADMIN_MANAGEMENT_PORT` | – | – | – | ◻ [9091] | prod only: internal port carrying the Admin Server's own `/actuator/health` |
 | `ADMIN_CLIENT_USER` / `ADMIN_CLIENT_PASSWORD` | ✅ | ✅ | ✅ | ✅ | Same values as the monolith's |
 | `DEV_ADMIN_USER` / `DEV_ADMIN_PASSWORD` | ◻ [admin] / ✅ | – | – | – | Local ADMIN user (dev only) |
 | `DEV_VIEWER_USER` / `DEV_VIEWER_PASSWORD` | ◻ [viewer] / ✅ | – | – | – | Local VIEWER user (dev only) |
 | `OIDC_ISSUER_URI` | – | ✅ | ✅ | ✅ | ADFS: `https://<adfs-host>/adfs`; Entra ID: `https://login.microsoftonline.com/<tenant-id>/v2.0` |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | – | ✅ | ✅ | ✅ | Confidential client registered in the IdP (one per environment) |
 | `OIDC_ADMIN_GROUPS` | – | ✅ | ✅ | ✅ | Comma-separated group/role values that grant ROLE_ADMIN (e.g. `SBA-Admin-PROD`) |
-| `OIDC_VIEWER_GROUPS` | – | ✅ | ✅ | ✅ | Comma-separated group/role values that grant ROLE_VIEWER (e.g. `SBA-Viewer-PROD`) |
+| `OIDC_VIEWER_GROUPS` | – | ✅ | ✅ | – | Comma-separated group/role values that grant ROLE_VIEWER (e.g. `SBA-Viewer-QUA`). **Not used in prod**: the viewer role is disabled there |
 | `OIDC_GROUP_CLAIMS` | – | ◻ [`groups,group,roles,role`] | ◻ | ◻ | Claims that carry the groups |
 | `OIDC_USERNAME_ATTRIBUTE` | – | ◻ [`upn`] | ◻ | ◻ | Claim used as the user name (audit logs, UI) |
 | `OIDC_SCOPES` | – | ◻ [`openid,profile,email,allatclaims`] | ◻ | ◻ | For Entra ID, drop `allatclaims` |
@@ -92,15 +93,58 @@ ACTUATOR_USER=actuator ACTUATOR_PASSWORD=... ADMIN_CLIENT_USER=client ADMIN_CLIE
 
 ### Tests
 ```bash
-mvn verify                       # monolith: 14 tests
-(cd admin-server && mvn verify)  # admin server: 22 tests, no IdP needed (in-process stub issuer + mocked users)
+mvn verify                       # monolith: 15 tests
+(cd admin-server && mvn verify)  # admin server: 23 tests, no IdP needed (in-process stub issuer + mocked users)
 ```
 
-## 4. What each environment exposes, and why
+## 4. Run in recf / qua / prod
+
+Same two artifacts, same images, in all three environments. Only `SPRING_PROFILES_ACTIVE` and the environment
+variables change — nothing env-specific is baked into the image.
+
+```bash
+mvn -DskipTests package && (cd admin-server && mvn -DskipTests package)   # or let the CI build the images
+```
+
+### Admin Server (one instance per environment, 1 replica)
+```bash
+export SPRING_PROFILES_ACTIVE=recf            # recf | qua | prod
+export ADMIN_CLIENT_USER=... ADMIN_CLIENT_PASSWORD=...        # same pair as the monolith's
+export OIDC_ISSUER_URI=https://adfs.example.com/adfs
+export OIDC_CLIENT_ID=... OIDC_CLIENT_SECRET=...
+export OIDC_ADMIN_GROUPS=SBA-Admin-RECF
+export OIDC_VIEWER_GROUPS=SBA-Viewer-RECF     # omit in prod: the viewer role is disabled there
+java -jar admin-server/target/admin-server-*.jar
+```
+Docker: `docker run -e SPRING_PROFILES_ACTIVE=recf -e ... -p 8081:8081 <registry>/admin-server:<tag>`.
+In Kubernetes these variables come from a `Secret` (OIDC + accounts) and a `ConfigMap` (profile, groups, ports).
+
+Check after start: `Admin <ENV>` title with the environment's colour, login redirects to the IdP, and the
+monolith appears as `monolith-<env>` with the tag `environment: <env>`.
+
+### Monolith (Admin client)
+```bash
+export SPRING_PROFILES_ACTIVE=recf            # recf | qua | prod
+export ADMIN_SERVER_URL=https://admin-recf.example.com        # https: the registration carries the Actuator password
+export ADMIN_CLIENT_USER=... ADMIN_CLIENT_PASSWORD=...
+export ACTUATOR_USER=... ACTUATOR_PASSWORD=...                # must differ from the registration account
+java -jar target/monolith-*.jar
+```
+`MANAGEMENT_PORT` (default 9090) applies in qua/prod only; recf keeps Actuator on 8080.
+
+### Ports per environment
+| | dev | recf | qua | prod |
+|---|---|---|---|---|
+| Admin Server UI (published) | 8081 | 8081 | 8081 | 8081 |
+| Admin Server own Actuator | 8081 | 8081 | 8081 | **9091, internal only** |
+| Monolith app | 8080 | 8080 | 8080 | 8080 |
+| Monolith Actuator | 8080 | 8080 | **9090** | **9090** |
+
+## 5. What each environment exposes, and why
 
 | Endpoint | dev | recf | qua | prod | Notes |
 |---|---|---|---|---|---|
-| health, info | ✅ public | ✅ public | ✅ public | ✅ public | Details only for the ACTUATOR role |
+| health, info | ✅ public | ✅ public | ✅ public | 🔒 **ACTUATOR account** | prod sets `app.actuator.public-health=false`: nothing on `/actuator` answers anonymously. Kubernetes uses `/livez` and `/readyz` on 8080 |
 | metrics, prometheus, loggers, threaddump, logfile | ✅ | ✅ | ✅ | ✅ | Day-to-day operations. `loggers` is writable |
 | env | ✅ | ✅ | ✅ | ❌ (off) | Values shown only to ACTUATOR, with secret-like keys and URI credentials masked. Off in prod: configuration is sensitive |
 | beans, mappings, scheduledtasks | ✅ | ✅ | ✅ | ❌ | Diagnostics, not needed in prod |
@@ -114,13 +158,13 @@ Kubernetes probes: on 8080 use `/livez` and `/readyz` (the additional paths). Al
 
 `/actuator/info` shows `build` (version, time, from `build-info`) and `git` (branch, commit, from `git.properties`). That's how the Admin UI shows which version runs in each environment.
 
-## 5. Authentication and authorization
+## 6. Authentication and authorization
 
 ### Roles (Admin Server)
 
 | Role | Who | Can |
 |---|---|---|
-| `ROLE_VIEWER` | IdP groups in `OIDC_VIEWER_GROUPS` (dev: `DEV_VIEWER_USER`) | UI, every **GET** Actuator call except `heapdump` and `env` |
+| `ROLE_VIEWER` | IdP groups in `OIDC_VIEWER_GROUPS` (dev: `DEV_VIEWER_USER`). **Does not exist in prod** | UI, every **GET** Actuator call except `heapdump` and `env` |
 | `ROLE_ADMIN` | IdP groups in `OIDC_ADMIN_GROUPS` (dev: `DEV_ADMIN_USER`) | Everything: log level changes, heapdump, env, cache clear, unregister, any write |
 | `ROLE_CLIENT` | the monolith's registration account (local, HTTP Basic) | `POST /instances` and `DELETE /instances/*` only. **Gets 403 on the UI and the Actuator proxy** |
 
@@ -140,6 +184,10 @@ The Admin Server calls the monolith's Actuator with **its own technical credenti
 | `POST /logout` | authenticated |
 | any other `GET`/`HEAD` | VIEWER or ADMIN |
 | anything else | ADMIN |
+
+In prod (`admin.security.viewer-enabled=false`) every "VIEWER or ADMIN" line above becomes **ADMIN only**, so the
+whole Admin Server — UI, read APIs and Actuator proxy — is reachable only by an authenticated member of
+`OIDC_ADMIN_GROUPS`. A user who happens to be in a viewer group gets no role at all and is refused everywhere.
 
 The same Actuator rules also apply to **`/applications/*/actuator/**`**. That SBA endpoint sends one call to every instance of an application, so without these rules a VIEWER could change log levels through it.
 
@@ -176,11 +224,11 @@ The two accounts **must be different**, with one pair per environment. Generate 
 - **Entra ID** (if you move from ADFS): use App Roles (`roles` claim) or `groups` (sent as **object IDs**, so put the GUIDs in `OIDC_*_GROUPS`). Set `OIDC_SCOPES=openid,profile,email`, `OIDC_USERNAME_ATTRIBUTE=preferred_username`, and enforce MFA with Conditional Access.
 - Suggested groups: `SBA-Admin-RECF`, `SBA-Viewer-RECF`, `SBA-Admin-QUA`, `SBA-Viewer-QUA`, `SBA-Admin-PROD`, `SBA-Viewer-PROD`. Keep the PROD admin group small.
 
-## 6. Notifications
+## 7. Notifications
 Mail and Microsoft Teams (`spring.boot.admin.notify.*`) fire on every status change except `UNKNOWN → UP`. That covers UP → DOWN/OFFLINE and the recovery back to UP. They default to on in qua/prod and off in dev/recf, and each can be switched with its `*_NOTIFY_ENABLED` variable. Teams titles carry the environment (`[PROD] Status changed`).
 
-## 7. Kubernetes notes
-- **Admin Server**: run **1 replica**. SBA keeps its event store in memory; several replicas would each hold a different view unless you add Hazelcast. The ingress has TLS and a VPN or IP allowlist.
+## 8. Kubernetes notes
+- **Admin Server**: run **1 replica**. SBA keeps its event store in memory; several replicas would each hold a different view unless you add Hazelcast. The ingress has TLS and a VPN or IP allowlist. In prod the pod's own Actuator is on **9091**, which stays out of the ingress: point the probes at `9091/actuator/health/liveness` and `/readiness`.
 - **Monolith**: instances register with their **pod IP** (`service-host-type: ip`), so each replica is monitored on its own.
 - **Actuator port 9090** (qua/prod): do not put it in the ingress. Restrict it with a NetworkPolicy:
 
@@ -204,20 +252,22 @@ spec:
 ```
 - In recf, Actuator stays on 8080: block `/actuator/**` (except health and info) at the ingress.
 
-## 8. Prod security checklist
+## 9. Prod security checklist
 - [ ] Admin reachable only over HTTPS, behind a VPN or IP allowlist; no public DNS record
 - [ ] MFA enforced by the ADFS access control policy (or Entra Conditional Access) for the Admin application
-- [ ] `OIDC_ADMIN_GROUPS` / `OIDC_VIEWER_GROUPS` point to the PROD groups; admin group membership reviewed
+- [ ] `OIDC_ADMIN_GROUPS` points to the PROD admin group, membership reviewed and kept small (`OIDC_VIEWER_GROUPS` is unused in prod)
 - [ ] Registration and Actuator accounts are distinct, random, stored in the secret manager, and have a rotation date
 - [ ] `ADMIN_SERVER_URL` is `https://`, because the registration carries the Actuator credentials
 - [ ] Monolith Actuator port 9090 is not in the ingress; NetworkPolicy/firewall allows only the Admin (and Prometheus)
-- [ ] `heapdump` and `env` absent from `/actuator` on prod (`ProdActuatorTest` checks this)
+- [ ] `heapdump` and `env` absent from `/actuator` on prod, and `/actuator` answers nothing anonymously — not even `health`/`info` (`ProdActuatorTest`)
+- [ ] Admin Server's own `/actuator` only on `ADMIN_MANAGEMENT_PORT` (9091), `health` only, and not in the ingress (`ProdResolvedPropertiesTest`, `ProdSecurityTest`)
+- [ ] `admin.security.viewer-enabled=false` in prod: no viewer role, so only authenticated members of `OIDC_ADMIN_GROUPS` can see anything (`ProdSecurityTest`)
 - [ ] Session cookie is `Secure`/`HttpOnly`/`SameSite=Lax`, 30 min timeout (`ProdResolvedPropertiesTest`)
 - [ ] `AUDIT` logs and Admin stdout are shipped to the log platform, with an alert on repeated `login.failure`
 - [ ] Notifications (mail/Teams) tested once by stopping a qua instance
 - [ ] Container runs as non-root (uid 10001), image scanned, Admin is 1 replica
 
-## 9. Trade-offs
+## 10. Trade-offs
 - **Monolith Spring Security**: the Actuator chain covers Actuator requests only. The demo's business endpoints stay open (`permitAll`, no CSRF, since there is no login or session). In the real monolith, keep its existing chain instead.
 - **Actuator credentials in metadata**: this is the simplest setup, as asked. The alternative is `spring.boot.admin.instance-auth.*` on the Admin Server, which keeps the credentials off the registration call.
 - **Group matching** is exact (case-insensitive). Configure the names exactly as the IdP emits them (unqualified for ADFS, GUIDs for Entra `groups`).

@@ -67,6 +67,8 @@ public class SecurityConfig {
         // Role separation must be enforced HERE, on the proxied /instances/{id}/actuator/** paths (and on
         // /applications/{name}/actuator/**, which fans the same call out to every instance of an application).
         // Matchers are evaluated in order: most specific first.
+        // readRoles: VIEWER + ADMIN normally, ADMIN only when admin.security.viewer-enabled=false (prod).
+        String[] readRoles = readRoles();
         http.authorizeHttpRequests(auth -> auth
                 .requestMatchers(path("/assets/**"), path("/login"), "/error").permitAll()
                 .requestMatchers(path("/oauth2/**"), path("/login/oauth2/**")).permitAll()
@@ -78,14 +80,14 @@ public class SecurityConfig {
                 .requestMatchers(proxied("/heapdump/**")).hasRole(ADMIN)
                 .requestMatchers(proxied("/env/**")).hasRole(ADMIN)
                 // Read-only Actuator calls.
-                .requestMatchers(proxied(GET, "/**")).hasAnyRole(VIEWER, ADMIN)
-                .requestMatchers(proxied(HEAD, "/**")).hasAnyRole(VIEWER, ADMIN)
+                .requestMatchers(proxied(GET, "/**")).hasAnyRole(readRoles)
+                .requestMatchers(proxied(HEAD, "/**")).hasAnyRole(readRoles)
                 // Any write on Actuator: log level change, cache clear, env change, ...
                 .requestMatchers(proxied("/**")).hasRole(ADMIN)
                 .requestMatchers(POST, path("/logout")).authenticated()
                 // UI and read APIs.
-                .requestMatchers(GET, path("/**")).hasAnyRole(VIEWER, ADMIN)
-                .requestMatchers(HEAD, path("/**")).hasAnyRole(VIEWER, ADMIN)
+                .requestMatchers(GET, path("/**")).hasAnyRole(readRoles)
+                .requestMatchers(HEAD, path("/**")).hasAnyRole(readRoles)
                 // Any other write (unregister an application, notification filters...).
                 .anyRequest().hasRole(ADMIN));
 
@@ -96,7 +98,8 @@ public class SecurityConfig {
                     .loginPage(authorizationPath)
                     .defaultSuccessUrl(path("/"), false)
                     .userInfoEndpoint(userInfo -> userInfo
-                            .userAuthoritiesMapper(new IdpGroupsAuthoritiesMapper(properties.oidc()))));
+                            .userAuthoritiesMapper(
+                                    new IdpGroupsAuthoritiesMapper(properties.oidc(), properties.viewerEnabled()))));
             OidcClientInitiatedLogoutSuccessHandler logoutSuccess =
                     new OidcClientInitiatedLogoutSuccessHandler(clientRegistrations.getObject());
             logoutSuccess.setPostLogoutRedirectUri("{baseUrl}" + path("/"));
@@ -134,7 +137,8 @@ public class SecurityConfig {
 
     /**
      * Local accounts. OIDC mode: only the monolith's registration account (ROLE_CLIENT).
-     * Basic mode (dev): plus one ADMIN and one VIEWER user. All credentials come from environment variables.
+     * Basic mode (dev): plus one ADMIN user and, unless the viewer role is disabled, one VIEWER user.
+     * All credentials come from environment variables.
      */
     @Bean
     UserDetailsService userDetailsService() {
@@ -143,9 +147,16 @@ public class SecurityConfig {
         users.add(user("admin.security.client", properties.client(), CLIENT, encoder));
         if (properties.mode() == AdminSecurityProperties.Mode.BASIC) {
             users.add(user("admin.security.admin", properties.admin(), ADMIN, encoder));
-            users.add(user("admin.security.viewer", properties.viewer(), VIEWER, encoder));
+            if (properties.viewerEnabled()) {
+                users.add(user("admin.security.viewer", properties.viewer(), VIEWER, encoder));
+            }
         }
         return new InMemoryUserDetailsManager(users);
+    }
+
+    /** Roles allowed to read the UI and to make GET/HEAD Actuator calls. */
+    private String[] readRoles() {
+        return properties.viewerEnabled() ? new String[] { VIEWER, ADMIN } : new String[] { ADMIN };
     }
 
     private static UserDetails user(String prefix, AdminSecurityProperties.Account account, String role,

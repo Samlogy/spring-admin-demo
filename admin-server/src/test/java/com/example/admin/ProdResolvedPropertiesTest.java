@@ -30,7 +30,8 @@ class ProdResolvedPropertiesTest {
                 .profiles("prod").properties(TestEnv.properties(idp.url())).run("--server.port=0")) {
             Environment env = context.getEnvironment();
             log.info("RESOLVED active profiles = {}", List.of(env.getActiveProfiles()));
-            for (String key : List.of("admin.security.mode",
+            for (String key : List.of("admin.security.mode", "admin.security.viewer-enabled",
+                    "management.server.port",
                     "server.servlet.session.timeout", "server.servlet.session.cookie.secure",
                     "server.servlet.session.cookie.http-only", "server.servlet.session.cookie.same-site",
                     "server.forward-headers-strategy", "management.endpoints.web.exposure.include",
@@ -38,12 +39,18 @@ class ProdResolvedPropertiesTest {
                 log.info("RESOLVED {} = {}", key, env.getProperty(key));
             }
             assertThat(env.getProperty("admin.security.mode")).isEqualTo("oidc");
+            // prod: no read-only role, and the viewer groups are not even read.
+            assertThat(env.getProperty("admin.security.viewer-enabled")).isEqualTo("false");
+            assertThat(env.getProperty("admin.security.oidc.viewer-groups")).isEmpty();
             assertThat(env.getProperty("server.servlet.session.timeout")).isEqualTo("30m");
             assertThat(env.getProperty("server.servlet.session.cookie.secure")).isEqualTo("true");
             assertThat(env.getProperty("server.servlet.session.cookie.http-only")).isEqualTo("true");
             assertThat(env.getProperty("server.servlet.session.cookie.same-site")).isEqualTo("lax");
             assertThat(env.getProperty("server.forward-headers-strategy")).isEqualTo("native");
-            assertThat(env.getProperty("management.endpoints.web.exposure.include")).isEqualTo("health,info");
+            // The Admin Server's own Actuator: health only, and on a separate internal port.
+            assertThat(env.getProperty("management.endpoints.web.exposure.include")).isEqualTo("health");
+            assertThat(env.getProperty("management.endpoint.info.access")).isEqualTo("none");
+            assertThat(env.getProperty("management.server.port")).isEqualTo("9091");
         }
     }
 }

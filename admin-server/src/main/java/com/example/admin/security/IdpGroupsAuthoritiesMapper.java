@@ -21,6 +21,9 @@ import java.util.stream.Collectors;
  * Only these two roles can come out of the IdP: every other authority (OIDC_USER, SCOPE_*...) is dropped,
  * and ROLE_CLIENT is never granted to a human. A user in none of the configured groups is authenticated
  * but gets 403 everywhere.
+ * <p>
+ * When {@code admin.security.viewer-enabled} is false (prod), ROLE_VIEWER is never granted, whatever the
+ * viewer groups say: only members of the admin groups get in.
  */
 public class IdpGroupsAuthoritiesMapper implements GrantedAuthoritiesMapper {
 
@@ -31,9 +34,13 @@ public class IdpGroupsAuthoritiesMapper implements GrantedAuthoritiesMapper {
     private final Set<String> viewerGroups;
 
     public IdpGroupsAuthoritiesMapper(AdminSecurityProperties.Oidc config) {
+        this(config, true);
+    }
+
+    public IdpGroupsAuthoritiesMapper(AdminSecurityProperties.Oidc config, boolean viewerEnabled) {
         this.config = config;
         this.adminGroups = normalize(config.adminGroups());
-        this.viewerGroups = normalize(config.viewerGroups());
+        this.viewerGroups = viewerEnabled ? normalize(config.viewerGroups()) : Set.of();
     }
 
     @Override
@@ -59,8 +66,8 @@ public class IdpGroupsAuthoritiesMapper implements GrantedAuthoritiesMapper {
             mapped.add(new SimpleGrantedAuthority("ROLE_" + Roles.VIEWER));
         }
         if (mapped.isEmpty()) {
-            log.warn("No Admin role mapped: none of the user's groups {} is configured in admin.security.oidc.*-groups",
-                    userGroups);
+            log.warn("No Admin role mapped: none of the user's groups {} grants access "
+                    + "(admin groups: {}, viewer groups: {})", userGroups, adminGroups, viewerGroups);
         }
         return mapped;
     }

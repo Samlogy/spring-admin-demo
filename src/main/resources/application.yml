@@ -57,6 +57,8 @@ management:
 
 app:
   actuator:
+    # Whether /actuator/health and /actuator/info answer without credentials. prod sets it to false.
+    public-health: true
     http-exchanges:
       enabled: false
       capacity: 100
