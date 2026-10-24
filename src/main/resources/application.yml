@@ -1,0 +1,67 @@
+# Common configuration for every environment. Env-specific values live in application-<env>.yml;
+# secrets and env-specific URLs come from environment variables only (see docs/spring-boot-admin.md).
+spring:
+  application:
+    name: monolith
+  security:
+    user:
+      # Technical account used by the Admin Server to call Actuator (role ACTUATOR).
+      # Must be different from the registration account below.
+      name: ${ACTUATOR_USER}
+      password: ${ACTUATOR_PASSWORD}
+      roles: ACTUATOR
+  boot:
+    admin:
+      client:
+        url: ${ADMIN_SERVER_URL}
+        # Registration account (role CLIENT on the Admin Server): can only register/deregister.
+        username: ${ADMIN_CLIENT_USER}
+        password: ${ADMIN_CLIENT_PASSWORD}
+        instance:
+          # Register with the pod/container IP so each replica is reachable individually.
+          # Override with SPRING_BOOT_ADMIN_CLIENT_INSTANCE_SERVICEBASEURL / ..._MANAGEMENTBASEURL if needed.
+          service-host-type: ${ADMIN_CLIENT_SERVICE_HOST_TYPE:ip}
+          metadata:
+            # Credentials the Admin Server uses for its Actuator calls (masked in the Admin UI).
+            "[user.name]": ${ACTUATOR_USER}
+            "[user.password]": ${ACTUATOR_PASSWORD}
+
+management:
+  endpoint:
+    health:
+      show-details: when-authorized
+      roles: ACTUATOR
+      probes:
+        enabled: true
+        # Also serve /livez and /readyz on the main port for Kubernetes probes.
+        add-additional-paths: true
+    env:
+      show-values: when-authorized
+      roles: ACTUATOR
+    configprops:
+      show-values: when-authorized
+      roles: ACTUATOR
+    loggers:
+      # Writable: POST /actuator/loggers/{name}. Who may do it is decided by the Admin Server (ROLE_ADMIN).
+      access: unrestricted
+  info:
+    git:
+      mode: full
+    java:
+      enabled: true
+    os:
+      enabled: true
+  httpexchanges:
+    recording:
+      enabled: ${app.actuator.http-exchanges.enabled}
+
+app:
+  actuator:
+    http-exchanges:
+      enabled: false
+      capacity: 100
+
+logging:
+  file:
+    # Required by /actuator/logfile (Admin "Logfile" view). Path is set per env.
+    name: ${LOG_FILE_NAME:logs/${spring.application.name}.log}

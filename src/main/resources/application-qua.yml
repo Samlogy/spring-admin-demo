@@ -1,0 +1,28 @@
+spring:
+  boot:
+    admin:
+      client:
+        instance:
+          name: ${spring.application.name}-qua
+          metadata:
+            "[tags.environment]": qua
+
+management:
+  server:
+    # Separate Actuator port, reachable only from the Admin Server (NetworkPolicy / firewall).
+    port: ${MANAGEMENT_PORT:9090}
+  endpoints:
+    web:
+      exposure:
+        # caches / flyway / liquibase / quartz are not used by this app, so they are not exposed.
+        # Add them here if the app starts using a CacheManager, Flyway, Liquibase or Quartz.
+        include: health,info,metrics,loggers,env,beans,mappings,threaddump,scheduledtasks,httpexchanges,prometheus,logfile
+
+app:
+  actuator:
+    http-exchanges:
+      enabled: true
+
+logging:
+  file:
+    name: ${LOG_FILE_NAME:/var/log/app/${spring.application.name}.log}

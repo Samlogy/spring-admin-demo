@@ -1,0 +1,249 @@
+# Spring Boot Admin Server: ONE instance per environment, same image, configured by profile + env vars.
+# Profiles: dev | recf | qua | prod. recf/qua/prod also activate the shared "oidc" profile.
+# No secret or env-specific URL in this file: see docs/spring-boot-admin.md for the variables.
+spring:
+  application:
+    name: admin-server
+  profiles:
+    group:
+      recf: oidc
+      qua: oidc
+      prod: oidc
+  boot:
+    admin:
+      ui:
+        remember-me-enabled: false
+      notify:
+        # Notifications fire on status changes (e.g. UP -> DOWN / OFFLINE, and the recovery back to UP).
+        mail:
+          enabled: ${MAIL_NOTIFY_ENABLED:false}
+          to: ${MAIL_NOTIFY_TO:}
+          from: ${MAIL_NOTIFY_FROM:Spring Boot Admin <noreply@localhost>}
+        ms-teams:
+          enabled: ${TEAMS_NOTIFY_ENABLED:false}
+          webhook-url: ${TEAMS_WEBHOOK_URL:}
+  thymeleaf:
+    # The UI templates ship inside spring-boot-admin-server-ui, there is no classpath:/templates/.
+    check-template-location: false
+  mail:
+    # A JavaMailSender (and thus the mail notifier) only exists when MAIL_HOST is set.
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      "[mail.smtp.auth]": ${MAIL_SMTP_AUTH:true}
+      "[mail.smtp.starttls.enable]": ${MAIL_SMTP_STARTTLS:true}
+
+server:
+  port: ${ADMIN_PORT:8081}
+  # TLS is terminated at the ingress / reverse proxy: trust its X-Forwarded-* headers (Tomcat RemoteIpValve,
+  # which by default only trusts private-network proxies; see server.tomcat.remoteip.internal-proxies).
+  forward-headers-strategy: native
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        name: ADMIN_SESSION
+        secure: true
+        http-only: true
+        same-site: lax
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  health:
+    # Do not let an SMTP outage mark the Admin Server itself DOWN.
+    mail:
+      enabled: false
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+admin:
+  security:
+    mode: oidc
+    client:
+      # Registration account used by the monolith (ROLE_CLIENT).
+      username: ${ADMIN_CLIENT_USER}
+      password: ${ADMIN_CLIENT_PASSWORD}
+    oidc:
+      registration-id: adfs
+      # ADFS issues "group"/"role" (claim rules), Entra ID issues "groups"/"roles".
+      group-claims: ${OIDC_GROUP_CLAIMS:groups,group,roles,role}
+      admin-groups: ${OIDC_ADMIN_GROUPS}
+      viewer-groups: ${OIDC_VIEWER_GROUPS}
+
+logging:
+  structured:
+    format:
+      # JSON (Elastic Common Schema) on stdout, ready for the log platform. The AUDIT logger carries login events.
+      console: ecs
+
+---
+spring:
+  config:
+    activate:
+      on-profile: oidc
+  security:
+    oauth2:
+      client:
+        registration:
+          adfs:
+            provider: adfs
+            client-id: ${OIDC_CLIENT_ID}
+            client-secret: ${OIDC_CLIENT_SECRET}
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            # allatclaims: ADFS puts the claims of the access token (incl. groups/roles) in the ID token too.
+            scope: ${OIDC_SCOPES:openid,profile,email,allatclaims}
+        provider:
+          adfs:
+            # e.g. https://adfs.example.com/adfs (ADFS) or https://login.microsoftonline.com/<tenant>/v2.0 (Entra ID)
+            issuer-uri: ${OIDC_ISSUER_URI}
+            user-name-attribute: ${OIDC_USERNAME_ATTRIBUTE:upn}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+  boot:
+    admin:
+      ui:
+        title: Admin DEV
+        brand: '<img src="assets/img/icon-spring-boot-admin.svg"><span>Admin DEV</span>'
+        theme:
+          # theme.color = browser <meta theme-color>; the palette colors the UI itself.
+          color: "#2e7d32" # green
+          palette:
+            "50": "#e8f5e9"
+            "100": "#c8e6c9"
+            "200": "#a5d6a7"
+            "300": "#81c784"
+            "400": "#66bb6a"
+            "500": "#4caf50"
+            "600": "#43a047"
+            "700": "#388e3c"
+            "800": "#2e7d32"
+            "900": "#1b5e20"
+
+server:
+  forward-headers-strategy: none
+  servlet:
+    session:
+      cookie:
+        # Local http://localhost only. Every other env keeps secure=true.
+        secure: false
+
+admin:
+  security:
+    # dev: local users with HTTP Basic / form login, no IdP needed.
+    mode: basic
+    admin:
+      username: ${DEV_ADMIN_USER:admin}
+      password: ${DEV_ADMIN_PASSWORD}
+    viewer:
+      username: ${DEV_VIEWER_USER:viewer}
+      password: ${DEV_VIEWER_PASSWORD}
+    oidc:
+      admin-groups: ""
+      viewer-groups: ""
+
+logging:
+  structured:
+    format:
+      console: ""
+
+---
+spring:
+  config:
+    activate:
+      on-profile: recf
+  boot:
+    admin:
+      ui:
+        title: Admin RECF
+        brand: '<img src="assets/img/icon-spring-boot-admin.svg"><span>Admin RECF</span>'
+        theme:
+          # theme.color = browser <meta theme-color>; the palette colors the UI itself.
+          color: "#1565c0" # blue
+          palette:
+            "50": "#e3f2fd"
+            "100": "#bbdefb"
+            "200": "#90caf9"
+            "300": "#64b5f6"
+            "400": "#42a5f5"
+            "500": "#2196f3"
+            "600": "#1e88e5"
+            "700": "#1976d2"
+            "800": "#1565c0"
+            "900": "#0d47a1"
+      notify:
+        ms-teams:
+          status-changed-title: "[RECF] Status changed"
+
+---
+spring:
+  config:
+    activate:
+      on-profile: qua
+  boot:
+    admin:
+      ui:
+        title: Admin QUA
+        brand: '<img src="assets/img/icon-spring-boot-admin.svg"><span>Admin QUA</span>'
+        theme:
+          # theme.color = browser <meta theme-color>; the palette colors the UI itself.
+          color: "#ef6c00" # orange
+          palette:
+            "50": "#fff3e0"
+            "100": "#ffe0b2"
+            "200": "#ffcc80"
+            "300": "#ffb74d"
+            "400": "#ffa726"
+            "500": "#ff9800"
+            "600": "#fb8c00"
+            "700": "#f57c00"
+            "800": "#ef6c00"
+            "900": "#e65100"
+      notify:
+        mail:
+          enabled: ${MAIL_NOTIFY_ENABLED:true}
+        ms-teams:
+          enabled: ${TEAMS_NOTIFY_ENABLED:true}
+          status-changed-title: "[QUA] Status changed"
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  boot:
+    admin:
+      ui:
+        title: Admin PROD
+        brand: '<img src="assets/img/icon-spring-boot-admin.svg"><span>Admin PROD</span>'
+        theme:
+          # theme.color = browser <meta theme-color>; the palette colors the UI itself.
+          color: "#c62828" # red
+          palette:
+            "50": "#ffebee"
+            "100": "#ffcdd2"
+            "200": "#ef9a9a"
+            "300": "#e57373"
+            "400": "#ef5350"
+            "500": "#f44336"
+            "600": "#e53935"
+            "700": "#d32f2f"
+            "800": "#c62828"
+            "900": "#b71c1c"
+      notify:
+        mail:
+          enabled: ${MAIL_NOTIFY_ENABLED:true}
+        ms-teams:
+          enabled: ${TEAMS_NOTIFY_ENABLED:true}
+          status-changed-title: "[PROD] Status changed"

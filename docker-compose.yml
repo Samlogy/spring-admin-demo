@@ -1,0 +1,33 @@
+# Local development only: Admin Server + monolith, both with the "dev" profile.
+#   cp .env.example .env   # then put real random values in .env
+#   docker compose up --build
+# Admin UI: http://localhost:8081 (DEV_ADMIN_USER / DEV_VIEWER_USER), monolith: http://localhost:8080/api/hello
+services:
+  admin-server:
+    build: ./admin-server
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      ADMIN_PORT: 8081
+      ADMIN_CLIENT_USER: ${ADMIN_CLIENT_USER:?set in .env}
+      ADMIN_CLIENT_PASSWORD: ${ADMIN_CLIENT_PASSWORD:?set in .env}
+      DEV_ADMIN_USER: ${DEV_ADMIN_USER:-admin}
+      DEV_ADMIN_PASSWORD: ${DEV_ADMIN_PASSWORD:?set in .env}
+      DEV_VIEWER_USER: ${DEV_VIEWER_USER:-viewer}
+      DEV_VIEWER_PASSWORD: ${DEV_VIEWER_PASSWORD:?set in .env}
+    ports:
+      - "8081:8081"
+
+  monolith:
+    build: .
+    depends_on:
+      - admin-server
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      ADMIN_SERVER_URL: http://admin-server:8081
+      ADMIN_CLIENT_USER: ${ADMIN_CLIENT_USER:?set in .env}
+      ADMIN_CLIENT_PASSWORD: ${ADMIN_CLIENT_PASSWORD:?set in .env}
+      ACTUATOR_USER: ${ACTUATOR_USER:?set in .env}
+      ACTUATOR_PASSWORD: ${ACTUATOR_PASSWORD:?set in .env}
+      LOG_FILE_NAME: /var/log/app/monolith.log
+    ports:
+      - "8080:8080"
