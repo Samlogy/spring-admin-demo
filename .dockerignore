@@ -1,0 +1,6 @@
+target/
+admin-server/
+docs/
+logs/
+.env
+*.md

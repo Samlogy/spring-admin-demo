@@ -1,0 +1,33 @@
+spring:
+  boot:
+    admin:
+      client:
+        instance:
+          name: ${spring.application.name}-prod
+          metadata:
+            "[tags.environment]": prod
+
+management:
+  server:
+    # Separate Actuator port, reachable only from the Admin Server (NetworkPolicy / firewall).
+    port: ${MANAGEMENT_PORT:9090}
+  endpoints:
+    web:
+      exposure:
+        # No heapdump (memory may contain secrets/PII) and no env (configuration values) in prod.
+        include: health,info,metrics,loggers,prometheus,threaddump,logfile
+  endpoint:
+    # Defence in depth: switch them off, not just unexposed.
+    heapdump:
+      access: none
+    env:
+      access: none
+
+app:
+  actuator:
+    http-exchanges:
+      enabled: false
+
+logging:
+  file:
+    name: ${LOG_FILE_NAME:/var/log/app/${spring.application.name}.log}

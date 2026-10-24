@@ -1,0 +1,25 @@
+spring:
+  boot:
+    admin:
+      client:
+        instance:
+          name: ${spring.application.name}-recf
+          metadata:
+            "[tags.environment]": recf
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # caches / flyway / liquibase / quartz are not used by this app, so they are not exposed.
+        # Add them here if the app starts using a CacheManager, Flyway, Liquibase or Quartz.
+        include: health,info,metrics,loggers,env,beans,mappings,threaddump,scheduledtasks,httpexchanges,prometheus,logfile
+
+app:
+  actuator:
+    http-exchanges:
+      enabled: true
+
+logging:
+  file:
+    name: ${LOG_FILE_NAME:/var/log/app/${spring.application.name}.log}
