@@ -27,7 +27,7 @@ One Admin Server per environment, built from the same code and image. Only the S
 | Monolith (Admin client) | repository root (`pom.xml`, `src/`) | Spring Boot 4.1.2, Java 21, Spring MVC, Maven |
 | Admin Server | `admin-server/` (separate Maven project) | Spring Boot Admin 4.1.4 (built against Boot 4.1.1, same 4.1 line), Spring Security 7.1 |
 
-> The repository was empty, so the monolith here is a small **demo** (one REST endpoint and one `@Scheduled` job). To apply this to the real monolith, copy the `pom.xml` dependencies and plugins, `config/ActuatorSecurityConfig.java`, `config/ActuatorConfig.java` and the `application*.yml` settings.
+> The repository was empty, so the monolith here is a small **demo**: an in-memory CRUD API (`/api/products`), one REST endpoint and one `@Scheduled` job. See the README for run instructions and API examples. To apply this to the real monolith, copy the `pom.xml` dependencies and plugins, `config/ActuatorSecurityConfig.java`, `config/ActuatorConfig.java` and the `application*.yml` settings.
 
 ## 2. Environment variables
 
@@ -92,7 +92,7 @@ ACTUATOR_USER=actuator ACTUATOR_PASSWORD=... ADMIN_CLIENT_USER=client ADMIN_CLIE
 
 ### Tests
 ```bash
-mvn verify                       # monolith: 12 tests
+mvn verify                       # monolith: 14 tests
 (cd admin-server && mvn verify)  # admin server: 22 tests, no IdP needed (in-process stub issuer + mocked users)
 ```
 
@@ -218,6 +218,6 @@ spec:
 - [ ] Container runs as non-root (uid 10001), image scanned, Admin is 1 replica
 
 ## 9. Trade-offs
-- **Monolith Spring Security**: the Actuator chain covers Actuator requests only. The demo's business endpoints stay open (`permitAll`), as they were before. In the real monolith, keep its existing chain instead.
+- **Monolith Spring Security**: the Actuator chain covers Actuator requests only. The demo's business endpoints stay open (`permitAll`, no CSRF, since there is no login or session). In the real monolith, keep its existing chain instead.
 - **Actuator credentials in metadata**: this is the simplest setup, as asked. The alternative is `spring.boot.admin.instance-auth.*` on the Admin Server, which keeps the credentials off the registration call.
 - **Group matching** is exact (case-insensitive). Configure the names exactly as the IdP emits them (unqualified for ADFS, GUIDs for Entra `groups`).

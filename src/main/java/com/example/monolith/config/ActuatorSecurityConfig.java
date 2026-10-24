@@ -47,7 +47,9 @@ public class ActuatorSecurityConfig {
     @Bean
     @Order(2)
     SecurityFilterChain applicationSecurityFilterChain(HttpSecurity http) throws Exception {
-        http.authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+        http.authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+                // The demo API has no login, session or cookie, so there is nothing for CSRF to protect.
+                .csrf(csrf -> csrf.disable());
         return http.build();
     }
 }
